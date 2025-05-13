@@ -1,0 +1,82 @@
+from flask import Flask, request, render_template_string
+import re
+import logging
+from typing import List, Tuple
+
+# Initialize Flask app
+app = Flask(_name_)
+
+# Set up logging
+logging.basicConfig(filename="prompt_injection.log", level=logging.INFO)
+
+# Unsafe keyword list
+unsafe_keywords = [
+    ("violence", "high"), ("bomb", "high"), ("hate", "medium"),
+    ("discrimination", "medium"), ("illegal", "medium"),
+    ("unethical", "medium"), ("racism", "high"),
+    ("exploit", "low"), ("hack", "low"),
+]
+
+# Malicious pattern definitions
+malicious_patterns = [
+    (r"(?i)(drop\s+table|union\s+select)", "SQL injection"),
+    (r"(?i)<script.*?>", "HTML/JavaScript injection"),
+    (r"(?i)(bash\s+-c\s+|system\s*\()", "Command execution"),
+]
+
+# HTML Template for web interface
+HTML_PAGE = '''
+<!doctype html>
+<title>Prompt Injection Detector</title>
+<h2>🔐 Enhanced Prompt Injection Detector</h2>
+<form method=post>
+  <textarea name=prompt rows=4 cols=60 placeholder="Enter your prompt here..."></textarea><br><br>
+  <input type=submit value=Submit>
+</form>
+{% if result %}
+  <h4>📢 Response:</h4>
+  <div style="border:1px solid #ccc;padding:10px;margin-top:10px;">{{ result }}</div>
+{% endif %}
+'''
+
+def sanitize_input(prompt: str) -> Tuple[str, List[str]]:
+    prompt_cleaned = re.sub(r"[^\w\s.,!?\"'-]", "", prompt)
+    violations = []
+    for keyword, severity in unsafe_keywords:
+        if re.search(rf"\b{keyword}\b", prompt_cleaned, re.IGNORECASE):
+            message = f"Detected keyword '{keyword}' (Severity: {severity})"
+            logging.warning(message + f" | Prompt: {prompt}")
+            violations.append(message)
+    return prompt_cleaned, violations
+
+def check_for_contextual_issues(prompt: str) -> List[str]:
+    issues = []
+    for pattern, description in malicious_patterns:
+        if re.search(pattern, prompt):
+            log_msg = f"Suspicious pattern ({description}) detected in: {prompt}"
+            logging.warning(log_msg)
+            issues.append(description)
+    return issues
+
+def generate_response(prompt: str) -> str:
+    issues = check_for_contextual_issues(prompt)
+    if issues:
+        return f"The request was flagged due to: {', '.join(issues)}."
+    return f"Response to: {prompt}"
+
+def process_prompt(prompt: str) -> str:
+    cleaned_prompt, violations = sanitize_input(prompt)
+    if violations:
+        return "Blocked due to content issues:\n- " + "\n- ".join(violations)
+    return generate_response(cleaned_prompt)
+
+@app.route("/", methods=["GET", "POST"])
+def home():
+    result = None
+    if request.method == "POST":
+        prompt = request.form["prompt"]
+        result = process_prompt(prompt)
+    return render_template_string(HTML_PAGE, result=result)
+
+if _name_ == "_main_":
+    app.run(debug=True)
